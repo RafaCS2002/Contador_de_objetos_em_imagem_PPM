@@ -6,6 +6,7 @@ typedef struct simg {
   int col, lin, max;
   unsigned char rf, gf, bf;
   char **mat;
+  int **matVis;
 } image;
 
 typedef struct {
@@ -20,14 +21,15 @@ typedef struct {
 
 void initPilha(pilha *pilha);
 void push(pilha *pilha, int x, int y);
-void pop(pilha *pilha);
-int percorreObjeto(image *img, pilha *coords, FILE **fp, int x, int y);
-void proxCoord(coord *topo, int xy[2], int layer);
+void pop(pilha *pilha, int *x, int *y);
+void percorreObjeto(image *img, pilha *pilCoord);
+coord catchLayer(pilha *pilCoord, int layer);
 
 int main() {
   char arq[] = "./img/02.ppm";  // Caminho relativo
   int init;                     // Posição inicial da imagem no arquivo
   unsigned char r, g, b;        // Receber a leitura de RGB da chunk
+  int obj = 0;
 
   pilha coords;  // Pilha de coordenadas
   initPilha(&coords);
@@ -47,37 +49,54 @@ int main() {
   fscanf(fp, "%c%c%c", &img.rf, &img.gf, &img.bf);  // Analisa o primeiro char pra saber a cor do fundo
   fseek(fp, init, SEEK_SET);
 
-  if (fp == NULL) {
+  if (fp == NULL) {  // Erro no arquivo
     printf("Erro na abertura do arquivo <%s>", arq);
     exit(EXIT_FAILURE);
   }
 
   img.mat = (char **)malloc(img.lin * sizeof(char *));  // cria o ponteiro pra matriz
   for (int i = 0; i < img.lin; i++) {                   // atribui a matriz ao ponteiro
-    img.mat[i] = (char *)calloc(img.col, sizeof(char));
+    img.mat[i] = (char *)malloc(img.col * sizeof(char));
   }
 
-  // Percorre imagem
+  img.matVis = (int **)malloc(img.lin * sizeof(int *));  // cria o ponteiro pra matriz
+  for (int i = 0; i < img.lin; i++) {                    // atribui a matriz ao ponteiro
+    img.matVis[i] = (int *)malloc(img.col * sizeof(int));
+  }
+
+  // Percorre imagem e atribui na img.mat
   for (int i = 0; i < img.lin; i++) {
     for (int j = 0; j < img.col; j++) {
       fscanf(fp, "%c%c%c", &r, &g, &b);
-      if (img.mat[i][j] != '.' && img.mat[i][j] != 'X') {
-        if ((r != img.rf) || (g != img.gf) || (b != img.bf)) {  // Checa pixels diferentes do fundo
-          percorreObjeto(&img, &coords, fp, i, j);
-        } else {
-          img.mat[i][j] = '.';
-        }
+      if ((r != img.rf) || (g != img.gf) || (b != img.bf)) {  // Checa pixels diferentes do fundo
+        img.mat[i][j] = 'X';
+      } else {
+        img.mat[i][j] = '.';
       }
     }
   }
   fclose(fp);
 
+  // Contador de Objetos
+  for (int i = 0; i < img.lin; i++) {
+    for (int j = 0; j < img.col; j++) {
+      if (img.mat[i][j] == 'X') {
+        obj++;
+        push(&coords, i, j);
+        img.matVis[i][j] = 1;
+        percorreObjeto(&img, &coords);
+      }
+    }
+  }
+
+  // Printa a imagem
   for (int i = 0; i < img.lin; i++) {
     for (int j = 0; j < img.col; j++) {
       printf("%c", img.mat[i][j]);
     }
     printf("\n");
   }
+  printf("\nTem %d objetos", obj);
 }
 
 void initPilha(pilha *pilha) {
@@ -101,67 +120,39 @@ void push(pilha *pilha, int x, int y) {
   pilha->tam++;  // Aumenta em um no o tamanho da pilha
 };
 
-void pop(pilha *pilha) {  // ***alterar
+void pop(pilha *pilha, int *x, int *y) {
   if (pilha->topo != NULL) {
     coord *temp = pilha->topo;
     pilha->topo = pilha->topo->prox;
 
-    free(temp);  // Libera a memoria ocupada pelo topo anterior, o no que esta sendo removido
-
+    *x = temp->x;
+    *y = temp->y;
+    free(temp);    // Libera a memoria ocupada pelo topo anterior, o no que esta sendo removido
     pilha->tam--;  // Diminui em um no o tamanho da pilha
   }
 };
 
-int percorreObjeto(image *img, pilha *coords, FILE **fp, int x, int y) {
-  push(coords, x, y);           // Coloca as coordenadas atuais na pilha
-  img->mat[x][y] = 'X';         // Add o pixel de objeto na matriz, ou seja, ja foi verificado
-  int posiCurrent = ftell(fp);  // Inicializa variável para guardar a posição atual
-  int posiNav = posiCurrent;    // Inicializa na posição atual
-  unsigned char r, g, b;
-  int xy[2];
+void percorreObjeto(image *img, pilha *pilCoord) {
+  int x, y;
+  int region;
+  while (pilCoord->tam != 0) {  // NAO SAI ATE A PILHA ZERAR
+    x = pilCoord->topo->x;
+    y = pilCoord->topo->y;
 
-  printf("%d\n", coords->topo->x);
-  printf("%d\n", coords->topo->y);
-
-  // entra na pilha, a partir dela, analisa os arredores
-  while (coords->tam != 0) {                 // NAO SAI ATE A PILHA ZERAR -- Soh vai sair dps de por td na matriz
-    for (int z = 0; z < coords->tam; z++) {  // Percorre a pilha
-      coord *topo = (coords)->topo;          // Coordenada do topo
-      proxCoord(topo, xy, z);                // XY passa a ter as coordenadas da posição z da pilha
-      // if (img->mat[][j] != '.' && img->mat[i][j] != 'X') {
-      // }
-      // // Checa em cima
-      // (qnt_de_col * tam_de_chunk) - (tam_de_chunk * volta_uma_leitura)
-      // posiNav = (img->col * 3) - (3 * 1);
-      // fseek(fp, posiNav, SEEK_CUR);
-      // fscanf(fp, "%c%c%c", &r, &g, &b);
-      // if ((r != img->rf) || (g != img->gf) || (b != img->bf)) {
-      //   push(coords, x, y);
-      // }
-      // posiNav = ((img->lin) * 3) - 1;
-      // fseek(fp, posiNav, SEEK_CUR);
+    region = 0;
+    for (int i = -1; i <= 1; i++) {
+      for (int j = -1; j <= 1; j++) {
+        if (img->mat[x + i][y + j] == 'X' && !img->matVis[x + i][y + j]) {  // Checa se na região ao redor tem objeto
+          push(pilCoord, x + i, y + j);                                     // Coloca na pilha a nova coordenada
+          img->matVis[x + i][y + j] = 1;                                    // Marca como visitado
+        } else {
+          region++;
+        }
+      }
     }
-    // Tem q descarregar as coord na matriz depois
-    break;
-  }
-  return posiCurrent;
-}
 
-void proxCoord(coord *topo, int xy[2], int layer) {
-  // pilha - para pegar as coordenadas
-  // xy - para receber as coordenadas respectivas da camada da pilha
-  // layer - posição da camada requisitada da pilha
-  coord *temp = topo;
-  if (layer != 0) {  // não é topo
-    // Percorre a pilha e faz temp receber
-    for (int foo = 0; foo < layer; foo++) {  // qnts vezes precisa pegar o prox
-      temp = temp->prox;
+    if (region == 9) {
+      pop(pilCoord, x, y);
     }
-    xy[0] = temp->x;
-    xy[1] = temp->y;
-  } else {  // eh topo
-    xy[0] = temp->x;
-    xy[1] = temp->y;
   }
-  printf("\nx = %d\ny = %d", xy[0], xy[1]);
 }
